@@ -1,0 +1,299 @@
+# Opportuntity-To-Invoice
+When opportunity is Insert with Type, In Invoice Insert the the same record of Opportunity type and Parent is Opportunity.
+
+Trigger
+trigger OpportunityTrigger on Opportunity (after insert,after update,after delete,after undelete) {
+   
+    if(trigger.isAfter){
+        if(trigger.isInsert){
+          OpportunityToInvoicClass.opportunityAfterInsert(trigger.new);
+        }
+        if(trigger.isUpdate){
+            OpportunityToInvoicClass.opportunityAfterUpdate(trigger.new,trigger.oldMap);
+        }
+        if(trigger.isDelete){
+            OpportunityToInvoicClass.opportunityAfterDelete(trigger.old);
+        }
+    }
+}
+
+Trigger Class
+
+public class OpportunityToInvoicClass { 
+    // Insert method for opportunity to invoice object
+    public static void opportunityAfterInsert(List<Opportunity> newList) {
+        Set<Id> ids = new Set<Id>();
+        for (Opportunity opp : newList) {
+            if(opp.Id!=null){
+                ids.add(opp.Id);
+            }
+        }
+        System.debug(ids);    
+        // Query Opportunities using the collected ids
+        Opportunity oppList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Id IN :ids];
+        System.debug(oppList);    
+        List<Invoice__c> invoiceLineItemSalesList = [SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where  Type__c='Sales'];
+        List<Invoice__c> invoiceLineItemOrderList =[Select Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c='Order'];
+        List<Invoice__c> invoiceLineItemServiceList =[Select Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c='Service'];
+        List<Invoice__c> listOfInvoices = new List<Invoice__c>();
+        List<Invoice__c> invoiceLineItemList = [SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c];
+        if((oppList.Type__c=='Sales' &&  invoiceLineItemSalesList.isEmpty()) || (oppList.Type__c=='Order' &&  invoiceLineItemOrderList.isEmpty()) || (oppList.Type__c=='Service' &&  invoiceLineItemServiceList.isEmpty())){
+            Invoice__c createInv = new Invoice__c(
+                Invoice__c=oppList.id,
+                Type__c=oppList.Type__c,
+                Name__c = oppList.Name,
+                Opportunity_Name__c = oppList.Name
+            );
+            Insert createInv;
+        }
+        else{
+            for(Invoice__c inv:invoiceLineItemList){
+                if((oppList.Type__c=='Sales' && inv.Type__c=='Sales') || (oppList.Type__c=='Order' && inv.Type__c=='Order') || (oppList.Type__c=='Service' && inv.Type__c=='Service')){
+                    Invoice__c i=new Invoice__c(id=inv.id,
+                                                Invoice__c=oppList.id,
+                                                Type__c=oppList.Type__c,
+                                                Name__c = oppList.Name,
+                                                Opportunity_Name__c = inv.Opportunity_Name__c+','+oppList.Name);
+                    Update i; 
+                }
+                
+            }        
+        }
+        
+    }
+    
+    // Update Metod for Opportunity to Invoice Object
+    public static void opportunityAfterUpdate(List<Opportunity> newList,Map<Id,Opportunity> oldMap){
+        Set<Id>  ids=new Set<Id>();
+        String oldType=oldMap.get(newList[0].id).Type__c;
+        for(Opportunity opp:newList){
+            if(opp.Type__c!=oldMap.get(opp.Id).Type__c ){
+                ids.add(opp.id);
+            }
+        }
+        Opportunity oppList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Id IN :ids];
+        
+        // If oldType is null and New Type is not null add the record in invoice
+        if(newList!=null){
+            List<Invoice__c> listType=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c];
+            for(Invoice__c inv:listType){
+                if(oppList.Type__c==inv.Type__c){
+                    Invoice__c i=new Invoice__c(id=inv.Id,
+                                                Invoice__c=oppList.Id,
+                                                Name__c=oppList.Name,
+                                                Type__c=oppList.Type__c,
+                                                Opportunity_Name__c = inv.Opportunity_Name__c+','+oppList.Name
+                                               );
+                    Update i;	
+                } 
+            }
+        }
+        // If NewType is null and old type is not null  Remove the record in invoice
+        if(oldType!=null){
+            List<Invoice__c> listOfCurrentType=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c = :oldType Order By Type__c ASC ];
+            List<String> splitType=listOfCurrentType[0].Opportunity_Name__c.split(',');
+            List<String> nameOfTheOldTypeName = new List<String>();
+            for (String s : splitType) {
+                if (oppList.Name != s) {
+                    nameOfTheOldTypeName.add(s);
+                }
+            }
+            // Convert the list to a comma-separated string
+            String commaSeparatedNames = String.join(nameOfTheOldTypeName, ',');
+            List<Opportunity> oppOldTypeList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Type__c=:oldType];
+            for(Opportunity opp:oppOldTypeList){
+                Invoice__c i=new Invoice__c(id=listOfCurrentType[0].Id,
+                                            Invoice__c=opp.Id,
+                                            Name__c=opp.Name,
+                                            Opportunity_Name__c = commaSeparatedNames
+                                           );
+                Update i;
+            }
+        }
+    }
+    
+    // If opportunity Record is Deleted, delete that same record in Invoice Record Page 
+    public static void opportunityAfterDelete(List<Opportunity> oldList){
+        Set<Id> ids=new Set<Id>();
+        String oldType='';
+        String oldName='';
+        for(Opportunity opp:oldList){
+            if(opp.Type__c!=null){
+                ids.add(opp.Id);
+                oldType=opp.Type__c;
+                oldName=opp.Name;
+            }
+        }
+        if(oldType!=null && !ids.isEmpty()){
+            List<Invoice__c> invList=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c = :oldType  Order By Type__c ASC ];
+            List<String> splitInvoiceType=invList[0].Opportunity_Name__c.split(',');
+            List<String> nameOfTheOldTypeName = new List<String>();
+            for (String s : splitInvoiceType) {
+                if (oldName != s) {
+                    nameOfTheOldTypeName.add(s);
+                }
+            }
+            Map<Id,Invoice__c> listInv=new Map<Id,Invoice__c>();
+            if(!nameOfTheOldTypeName.isEmpty()){
+                // Convert the list to a comma-separated string
+                String commaSeparatedNames = String.join(nameOfTheOldTypeName, ',');
+                List<Opportunity> oppOldTypeList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Type__c=:oldType];
+                for(Opportunity opp:oppOldTypeList){
+                    Invoice__c i=new Invoice__c(id=invList[0].Id,
+                                                Invoice__c=opp.Id,
+                                                Name__c=opp.Name,
+                                                Opportunity_Name__c = commaSeparatedNames
+                                               );
+                    listInv.put(i.Id,i);
+                }
+                if(!listInv.isEmpty()){
+                    Update listInv.values();
+                }   
+            }
+            else{
+                Delete invList;
+            }
+        }
+    }
+}
+
+
+Test Class
+
+
+@isTest
+public class OpportunityToInvoiceTestClass {
+    public static TestMethod void OpportunityToInvoice(){
+        Account a=new Account();
+        a.Name='Mothee';
+        Insert a;
+        Product2 p=new Product2();
+        p.Name='Wood';
+        Insert p;
+        
+        
+        // If Opportunity Record is Insert, In Invoice record page insert particular Opportunity record
+        Opportunity S1=new Opportunity();
+        S1.Name='S1';
+        S1.CloseDate=System.Today();
+        S1.StageName='Closed Won';
+        S1.Type__c='Sales';
+        Insert S1;
+        
+        Invoice__c i=new Invoice__c();
+        i.Invoice__c=S1.Id;
+        i.Name__c=S1.Name;
+        i.Opportunity_Name__c=S1.Name;
+        i.Type__c=S1.Type__c;
+        Insert i;
+        Opportunity O1=new Opportunity();
+        O1.Name='O1';
+        O1.CloseDate=System.Today();
+        O1.StageName='Closed Won';
+        O1.Type__c='Order';
+        Insert O1;
+        
+        Invoice__c i1=new Invoice__c();
+        i1.Invoice__c=O1.Id;
+        i1.Name__c=O1.Name;
+        i1.Opportunity_Name__c=O1.Name;
+        i1.Type__c=O1.Type__c;
+        Insert i1;
+        
+        Opportunity Serv1=new Opportunity();
+        Serv1.Name='Serv1';
+        Serv1.CloseDate=System.Today();
+        Serv1.StageName='Closed Won';
+        Serv1.Type__c='Service';
+        Insert Serv1;
+        
+        Invoice__c i2=new Invoice__c();
+        i2.Invoice__c=Serv1.Id;
+        i2.Name__c=Serv1.Name;
+        i2.Opportunity_Name__c=Serv1.Name;
+        i2.Type__c=Serv1.Type__c;
+        Insert i2;
+        
+        // If Opportunity Record is Insert with same Type, In Invoice record page Update the same type of the Opportunity record
+        Opportunity S2=new Opportunity();
+        S2.Name='S2';
+        S2.CloseDate=System.Today();
+        S2.StageName='Closed Won';
+        S2.Type__c='Sales';
+        Insert S2;
+        
+        i.Invoice__c=S2.id;
+        i.Name__c=S2.Name;
+        i.Type__c=S2.Type__c;
+        i.Opportunity_Name__c=S2.Name;
+        Update i;
+        
+        Opportunity O2=new Opportunity();
+        O2.Name='O2';
+        O2.CloseDate=System.Today();
+        O2.StageName='Closed Won';
+        O2.Type__c='Order';
+        Insert O2;
+        
+        i1.Invoice__c=O2.id;
+        i1.Name__c=O2.Name;
+        i1.Type__c=O2.Type__c;
+        i1.Opportunity_Name__c=O1.Name+','+O2.Name;
+        Update i1;
+        
+        Opportunity Serv2=new Opportunity();
+        Serv2.Name='Serv2';
+        Serv2.CloseDate=System.Today();
+        Serv2.StageName='Closed Won';
+        Serv2.Type__c='Service';
+        Insert Serv2;
+        
+        i2.Invoice__c=Serv2.id;
+        i2.Name__c=Serv2.Name;
+        i2.Type__c=Serv2.Type__c;
+        i2.Opportunity_Name__c=Serv1.Name+','+Serv2.Name;
+        Update i2;
+        
+        // If Opportunity Record is Update, In Invoice record page Update the type of the Opportunity record
+        // Opportunity Update
+        List<Opportunity> opp=new List<Opportunity>();
+        S1.Name='S1';
+        S1.CloseDate=System.Today();
+        S1.StageName='Closed Won';
+        S1.Type__c='Service';
+        opp.add(S1);
+        Update opp;
+        
+        i.Invoice__c=S1.id;
+        i.Name__c=S1.Name;
+        i.Type__c=S1.Type__c;
+        i.Opportunity_Name__c=S1.Name+','+S2.Name;
+        Update i;
+        
+        // If Opportunity Record is Delete, In Invoice record page Delete the Same type of the Opportunity record
+        // Opportunity Delete
+        
+        List<Opportunity> oppDelete=new List<Opportunity>();
+        S1.Name='S1';
+        S1.CloseDate=System.Today();
+        S1.StageName='Closed Won';
+        S1.Type__c='Service';
+        oppDelete.add(S1);
+        Delete oppDelete;
+        
+        i.Invoice__c=S2.id;
+        i.Name__c=S2.Name;
+        i.Type__c=S2.Type__c;
+        i.Opportunity_Name__c=S2.Name;
+        Update i;
+        
+        List<Opportunity> oppDelete1=new List<Opportunity>();
+        S2.Name='S2';
+        S2.CloseDate=System.Today();
+        S2.StageName='Closed Won';
+        S2.Type__c='Service';
+        oppDelete1.add(S2);
+        Delete oppDelete1;
+        
+    }
+}
