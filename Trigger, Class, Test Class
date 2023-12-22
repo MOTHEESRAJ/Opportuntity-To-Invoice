@@ -21,98 +21,95 @@ Trigger Class
 
 public class OpportunityToInvoicClass { 
     // Insert method for opportunity to invoice object
+    // Insert method for opportunity for amount
     public static void opportunityAfterInsert(List<Opportunity> newList) {
         Set<Id> ids = new Set<Id>();
+        String oppType='';
         for (Opportunity opp : newList) {
-            if(opp.Id!=null){
+            if(opp.Id!=null || opp.Amount!=null){
                 ids.add(opp.Id);
+                oppType=opp.Type__c;
             }
         }
         System.debug(ids);    
         // Query Opportunities using the collected ids
-        Opportunity oppList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Id IN :ids];
+        Opportunity oppList = [SELECT Id, Type__c, Name,Amount FROM Opportunity WHERE Id IN :ids];
         System.debug(oppList);    
         List<Invoice__c> invoiceLineItemSalesList = [SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where  Type__c='Sales'];
         List<Invoice__c> invoiceLineItemOrderList =[Select Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c='Order'];
         List<Invoice__c> invoiceLineItemServiceList =[Select Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c='Service'];
         List<Invoice__c> listOfInvoices = new List<Invoice__c>();
         List<Invoice__c> invoiceLineItemList = [SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c];
-        if((oppList.Type__c=='Sales' &&  invoiceLineItemSalesList.isEmpty()) || (oppList.Type__c=='Order' &&  invoiceLineItemOrderList.isEmpty()) || (oppList.Type__c=='Service' &&  invoiceLineItemServiceList.isEmpty())){
+        if((oppList.Type__c=='Sales' &&  invoiceLineItemSalesList.isEmpty()) || (oppList.Type__c=='Order' && invoiceLineItemOrderList.isEmpty()) || (oppList.Type__c=='Service' && invoiceLineItemServiceList.isEmpty())){
             Invoice__c createInv = new Invoice__c(
                 Invoice__c=oppList.id,
                 Type__c=oppList.Type__c,
+                Amount__c=oppList.Amount,
                 Name__c = oppList.Name,
                 Opportunity_Name__c = oppList.Name
             );
             Insert createInv;
         }
         else{
+            List<Opportunity> oppListForAmount=[Select id,Type__c,Amount from Opportunity Where Amount!=null and Type__c=:oppType];
+            System.debug(oppListForAmount);
+            Decimal totalAmount;
+            // AggregateResult object for calculating total amount in amount field
+            for(Opportunity opp:oppListForAmount){
+                List<AggregateResult> aggResult=[Select Id,Sum(Amount) totalAmount from Opportunity where Type__c=:oppType and Amount!=null
+                                                 Group By Id];
+                System.debug(aggResult);
+                if(opp.Amount!=null){
+                    // Caller method for calculating total amount
+                    totalAmount=calculateOppAmount(aggResult);
+                    System.debug(totalAmount);
+                }
+            }
             for(Invoice__c inv:invoiceLineItemList){
-                if((oppList.Type__c=='Sales' && inv.Type__c=='Sales') || (oppList.Type__c=='Order' && inv.Type__c=='Order') || (oppList.Type__c=='Service' && inv.Type__c=='Service')){
+                if((oppList.Type__c=='Sales' && inv.Type__c=='Sales') || (oppList.Type__c=='Order' && inv.Type__c=='Order') || (oppList.Type__c=='Service' && inv.Type__c=='Service')){                    
                     Invoice__c i=new Invoice__c(id=inv.id,
                                                 Invoice__c=oppList.id,
                                                 Type__c=oppList.Type__c,
+                                                Amount__c=totalAmount,
                                                 Name__c = oppList.Name,
                                                 Opportunity_Name__c = inv.Opportunity_Name__c+','+oppList.Name);
                     Update i; 
                 }
-                
             }        
         }
-        
     }
+    
     
     // Update Metod for Opportunity to Invoice Object
+    // update method for opportunity if Type is change, in Invoice change the same type and update the amount
+    
+    
     public static void opportunityAfterUpdate(List<Opportunity> newList,Map<Id,Opportunity> oldMap){
-        Set<Id>  ids=new Set<Id>();
+        Set<Id>  typeIds=new Set<Id>();
+        Set<Id>  amountIds=new Set<Id>();
         String oldType=oldMap.get(newList[0].id).Type__c;
+        Decimal oldAmount=oldMap.get(newList[0].id).Amount;
+        String newType;
+        Decimal newAmount;
         for(Opportunity opp:newList){
-            if(opp.Type__c!=oldMap.get(opp.Id).Type__c ){
-                ids.add(opp.id);
+            if(opp.Type__c!=oldType ){ 
+                System.debug('First Of Type');
+                typeIds.add(opp.id);
+                newType=opp.Type__c;
+                typeIsUpdated(typeIds,newType,oldType, newAmount, oldAmount);
+            }
+            if(opp.Amount!=oldAmount){
+                System.debug('First Of Amount');
+                amountIds.add(opp.id);
+                newAmount=opp.Amount;
+                amountIsUpdated(amountIds,newAmount,oldAmount,oldType);
             }
         }
-        Opportunity oppList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Id IN :ids];
-        
-        // If oldType is null and New Type is not null add the record in invoice
-        if(newList!=null){
-            List<Invoice__c> listType=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c];
-            for(Invoice__c inv:listType){
-                if(oppList.Type__c==inv.Type__c){
-                    Invoice__c i=new Invoice__c(id=inv.Id,
-                                                Invoice__c=oppList.Id,
-                                                Name__c=oppList.Name,
-                                                Type__c=oppList.Type__c,
-                                                Opportunity_Name__c = inv.Opportunity_Name__c+','+oppList.Name
-                                               );
-                    Update i;	
-                } 
-            }
-        }
-        // If NewType is null and old type is not null  Remove the record in invoice
-        if(oldType!=null){
-            List<Invoice__c> listOfCurrentType=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c = :oldType Order By Type__c ASC ];
-            List<String> splitType=listOfCurrentType[0].Opportunity_Name__c.split(',');
-            List<String> nameOfTheOldTypeName = new List<String>();
-            for (String s : splitType) {
-                if (oppList.Name != s) {
-                    nameOfTheOldTypeName.add(s);
-                }
-            }
-            // Convert the list to a comma-separated string
-            String commaSeparatedNames = String.join(nameOfTheOldTypeName, ',');
-            List<Opportunity> oppOldTypeList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Type__c=:oldType];
-            for(Opportunity opp:oppOldTypeList){
-                Invoice__c i=new Invoice__c(id=listOfCurrentType[0].Id,
-                                            Invoice__c=opp.Id,
-                                            Name__c=opp.Name,
-                                            Opportunity_Name__c = commaSeparatedNames
-                                           );
-                Update i;
-            }
-        }
-    }
+    }   
+    
     
     // If opportunity Record is Deleted, delete that same record in Invoice Record Page 
+    
     public static void opportunityAfterDelete(List<Opportunity> oldList){
         Set<Id> ids=new Set<Id>();
         String oldType='';
@@ -125,7 +122,7 @@ public class OpportunityToInvoicClass {
             }
         }
         if(oldType!=null && !ids.isEmpty()){
-            List<Invoice__c> invList=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c = :oldType  Order By Type__c ASC ];
+            List<Invoice__c> invList=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c = :oldType ];
             List<String> splitInvoiceType=invList[0].Opportunity_Name__c.split(',');
             List<String> nameOfTheOldTypeName = new List<String>();
             for (String s : splitInvoiceType) {
@@ -137,11 +134,16 @@ public class OpportunityToInvoicClass {
             if(!nameOfTheOldTypeName.isEmpty()){
                 // Convert the list to a comma-separated string
                 String commaSeparatedNames = String.join(nameOfTheOldTypeName, ',');
-                List<Opportunity> oppOldTypeList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Type__c=:oldType];
+                List<Opportunity> oppOldTypeList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Type__c=:oldType  Order By Name ASC ];
+                List<AggregateResult> aggResDeleteAmt=[Select Id,Sum(Amount) totalAmount from Opportunity where Type__c=:oldType and Amount!=null
+                                                       Group by Id];
+                Decimal totalAmount=calculateOppAmount(aggResDeleteAmt);
+                System.debug(totalAmount);
                 for(Opportunity opp:oppOldTypeList){
                     Invoice__c i=new Invoice__c(id=invList[0].Id,
                                                 Invoice__c=opp.Id,
                                                 Name__c=opp.Name,
+                                                Amount__c=totalAmount,
                                                 Opportunity_Name__c = commaSeparatedNames
                                                );
                     listInv.put(i.Id,i);
@@ -155,6 +157,156 @@ public class OpportunityToInvoicClass {
             }
         }
     }
+    
+    // Called method for calculating total amount
+    public static Decimal calculateOppAmount(List<AggregateResult> aggRes)
+    {
+        Decimal t=0;
+        for(AggregateResult agg:aggRes){
+            t+=(Decimal) agg.get('totalAmount');
+        }
+        return t;
+    }
+    
+    // If Amount is updated this should be called
+    public static void amountIsUpdated(Set<Id>  amountIds,Decimal newAmount,Decimal oldAmount,String oldType){
+        Opportunity oppList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Id IN :amountIds];
+        List<Opportunity> oldTypeOpportunity=[Select id,Type__c, Name FROM Opportunity WHERE Type__c=:oldType and Amount!=null
+                                              Order By Name ASC];
+        // All new opportunity type
+        List<Opportunity> newTypeOpportunity=[Select id,Type__c, Name FROM Opportunity WHERE Type__c=:oppList.Type__c and Amount!=null
+                                              Order By Name ASC];
+        List<Invoice__c> listType=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c];
+        List<Opportunity> oppOldTypeList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Type__c=:oldType 
+                                            Order By Name ASC ];
+        
+        if((newAmount!=null && oldType!=null)||(newAmount==null && oldType!=null)){
+            System.debug('Hi From newAmount');
+            Decimal newTotalAmount;
+            for(Opportunity opp:newTypeOpportunity){
+                List<AggregateResult> aggResAmount=[Select id,Sum(Amount) totalAmount from Opportunity where Type__c=:oppList.Type__c and Amount!=null
+                                                    Group By Id];
+                System.debug(aggResAmount);
+                newTotalAmount=calculateOppAmount(aggResAmount);
+                System.debug(newTotalAmount);
+            }
+            for(Invoice__c inv:listType){
+                if(oppList.Type__c==inv.Type__c){
+                    Invoice__c i=new Invoice__c(id=inv.Id,
+                                                Invoice__c=oppList.Id,
+                                                Name__c=oppList.Name,
+                                                Type__c=oppList.Type__c,
+                                                Amount__c=newTotalAmount
+                                               );
+                    Update i;	
+                    System.debug(i);
+                }
+                
+            }
+        }
+    }
+    
+    
+    // If Type is updated this method should be called
+    public static void typeIsUpdated(Set<Id> typeOfIds,String newType,String oldType,Decimal newAmount,Decimal oldAmount){
+        Opportunity oppList = [SELECT Id, Type__c, Name,Amount FROM Opportunity WHERE Id IN :typeOfIds];
+        // All Old opportunity type
+        List<Opportunity> oldTypeOpportunity=[Select id,Type__c, Name FROM Opportunity WHERE Type__c=:oldType and Amount!=null Order By Name ASC];
+        // All new opportunity type
+        List<Opportunity> newTypeOpportunity=[Select id,Type__c, Name FROM Opportunity WHERE Type__c=:newType and Amount!=null Order By Name ASC];
+        List<Invoice__c> listType=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c];
+        //To fetch the old invoice type, if it is there or not
+        List<Invoice__c> emptyInvoice=[Select Id,Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c=:newType];
+        
+        List<Opportunity> oppOldTypeList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Type__c=:oldType 
+                                            Order By Name ASC ];
+        // If oldType is null and New Type is not null add the record in invoice
+        if(newType!=null){
+            System.debug('Hi from newType');
+            Decimal newTotalAmount;
+            for(Opportunity opp:newTypeOpportunity){
+                List<AggregateResult> aggResAmount=[Select id,Sum(Amount) totalAmount from Opportunity where Type__c=:oppList.Type__c and Amount!=null
+                                                    Group By Id];
+                System.debug(aggResAmount);
+                newTotalAmount=calculateOppAmount(aggResAmount);
+                System.debug(newTotalAmount);
+            }
+            for(Invoice__c inv:listType){
+                if(oppList.Type__c==inv.Type__c && !emptyInvoice.isEmpty()){
+                    Invoice__c i=new Invoice__c(id=inv.Id,
+                                                Invoice__c=oppList.Id,
+                                                Name__c=oppList.Name,
+                                                Type__c=oppList.Type__c,
+                                                Amount__c=newTotalAmount,
+                                                Opportunity_Name__c = inv.Opportunity_Name__c+','+oppList.Name
+                                               );
+                    Update i;	
+                    System.debug(i);
+                }
+                
+            }
+            System.debug(emptyInvoice);
+            // If In Invoice record, type is not there it will be insert  
+            if(emptyInvoice.isEmpty()){
+                Invoice__c createInv = new Invoice__c(
+                   
+                    Invoice__c=oppList.id,
+                    Type__c=oppList.Type__c,
+                    Name__c = oppList.Name,
+                    Amount__c=oppList.Amount,
+                    Opportunity_Name__c = oppList.Name
+                );
+                Insert createInv;
+            }
+        }
+        // If NewType is null and old type is not null  Remove the record in invoice
+        if(oldType!=null){
+            System.debug('Hi from OldType');
+            List<Invoice__c> listOfCurrentType=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c = :oldType ];
+            System.debug(listOfCurrentType[0].Opportunity_Name__c);
+            List<String> splitType=listOfCurrentType[0].Opportunity_Name__c.split(',');
+            System.debug(splitType);
+            List<String> nameOfTheOldTypeName = new List<String>();
+            for (String s : splitType) {
+                if (oppList.Name != s) {
+                    nameOfTheOldTypeName.add(s);
+                    
+                }
+            }
+            System.debug(nameOfTheOldTypeName);
+            // Convert the list to a comma-separated string
+            String commaSeparatedNames;
+            
+            Decimal oldTotalAmount;
+            for(Opportunity opp:oldTypeOpportunity){
+                List<AggregateResult> aggResAmount=[Select id,Sum(Amount) totalAmount from Opportunity where Type__c=:oldType and Amount!=null
+                                                    Group By Id];
+                System.debug(aggResAmount);
+                oldTotalAmount=calculateOppAmount(aggResAmount);
+                System.debug(oldTotalAmount);
+            }
+            
+            if(!nameOfTheOldTypeName.isEmpty()){
+                System.debug('Not Empty');
+                commaSeparatedNames= String.join(nameOfTheOldTypeName, ',');
+                
+                for(Opportunity opp:oppOldTypeList){
+                    Invoice__c i=new Invoice__c(id=listOfCurrentType[0].Id,
+                                                Invoice__c=opp.Id,
+                                                Name__c=opp.Name,
+                                                Amount__c=oldTotalAmount,
+                                                Opportunity_Name__c = commaSeparatedNames
+                                               );
+                    System.debug(i.Opportunity_Name__c);
+                    Update i;
+                }
+            }
+            else{
+                Delete listOfCurrentType;
+            }
+            System.debug(commaSeparatedNames);
+        }
+    }
 }
 
 
@@ -164,6 +316,7 @@ Test Class
 @isTest
 public class OpportunityToInvoiceTestClass {
     public static TestMethod void OpportunityToInvoice(){
+        Test.StartTest();
         Account a=new Account();
         a.Name='Mothee';
         Insert a;
@@ -178,11 +331,13 @@ public class OpportunityToInvoiceTestClass {
         S1.CloseDate=System.Today();
         S1.StageName='Closed Won';
         S1.Type__c='Sales';
+        S1.Amount=200;
         Insert S1;
         
         Invoice__c i=new Invoice__c();
         i.Invoice__c=S1.Id;
         i.Name__c=S1.Name;
+        i.Amount__c=S1.Amount;
         i.Opportunity_Name__c=S1.Name;
         i.Type__c=S1.Type__c;
         Insert i;
@@ -190,6 +345,7 @@ public class OpportunityToInvoiceTestClass {
         O1.Name='O1';
         O1.CloseDate=System.Today();
         O1.StageName='Closed Won';
+        O1.Amount=null;
         O1.Type__c='Order';
         Insert O1;
         
@@ -197,6 +353,7 @@ public class OpportunityToInvoiceTestClass {
         i1.Invoice__c=O1.Id;
         i1.Name__c=O1.Name;
         i1.Opportunity_Name__c=O1.Name;
+        i1.Amount__c=O1.Amount;
         i1.Type__c=O1.Type__c;
         Insert i1;
         
@@ -204,6 +361,7 @@ public class OpportunityToInvoiceTestClass {
         Serv1.Name='Serv1';
         Serv1.CloseDate=System.Today();
         Serv1.StageName='Closed Won';
+        Serv1.Amount=1;
         Serv1.Type__c='Service';
         Insert Serv1;
         
@@ -211,6 +369,7 @@ public class OpportunityToInvoiceTestClass {
         i2.Invoice__c=Serv1.Id;
         i2.Name__c=Serv1.Name;
         i2.Opportunity_Name__c=Serv1.Name;
+        i2.Amount__c=Serv1.Amount;
         i2.Type__c=Serv1.Type__c;
         Insert i2;
         
@@ -218,6 +377,7 @@ public class OpportunityToInvoiceTestClass {
         Opportunity S2=new Opportunity();
         S2.Name='S2';
         S2.CloseDate=System.Today();
+        S2.Amount=0;
         S2.StageName='Closed Won';
         S2.Type__c='Sales';
         Insert S2;
@@ -225,6 +385,7 @@ public class OpportunityToInvoiceTestClass {
         i.Invoice__c=S2.id;
         i.Name__c=S2.Name;
         i.Type__c=S2.Type__c;
+        i.Amount__c=S2.Amount;
         i.Opportunity_Name__c=S2.Name;
         Update i;
         
@@ -232,12 +393,14 @@ public class OpportunityToInvoiceTestClass {
         O2.Name='O2';
         O2.CloseDate=System.Today();
         O2.StageName='Closed Won';
+        O2.Amount=100;
         O2.Type__c='Order';
         Insert O2;
         
         i1.Invoice__c=O2.id;
         i1.Name__c=O2.Name;
         i1.Type__c=O2.Type__c;
+        i1.Amount__c=O2.Amount;
         i1.Opportunity_Name__c=O1.Name+','+O2.Name;
         Update i1;
         
@@ -245,11 +408,13 @@ public class OpportunityToInvoiceTestClass {
         Serv2.Name='Serv2';
         Serv2.CloseDate=System.Today();
         Serv2.StageName='Closed Won';
+        Serv2.Amount=1;
         Serv2.Type__c='Service';
         Insert Serv2;
         
         i2.Invoice__c=Serv2.id;
         i2.Name__c=Serv2.Name;
+        i2.Amount__c=Serv2.Amount;
         i2.Type__c=Serv2.Type__c;
         i2.Opportunity_Name__c=Serv1.Name+','+Serv2.Name;
         Update i2;
@@ -260,15 +425,50 @@ public class OpportunityToInvoiceTestClass {
         S1.Name='S1';
         S1.CloseDate=System.Today();
         S1.StageName='Closed Won';
+        S1.Amount=500;
         S1.Type__c='Service';
         opp.add(S1);
         Update opp;
         
-        i.Invoice__c=S1.id;
-        i.Name__c=S1.Name;
-        i.Type__c=S1.Type__c;
-        i.Opportunity_Name__c=S1.Name+','+S2.Name;
-        Update i;
+        i2.Invoice__c=S1.id;
+        i2.Name__c=S1.Name;
+        i2.Type__c=S1.Type__c;
+        i2.Amount__c=S1.Amount+Serv2.Amount+Serv1.Amount;
+        i2.Opportunity_Name__c=S1.Name+','+S2.Name;
+        Update i2;
+        
+        List<Opportunity> opp1=new List<Opportunity>();
+        S2.Name='S2';
+        S2.CloseDate=System.Today();
+        S2.StageName='Closed Won';
+        S2.Amount=500;
+        S2.Type__c='Service';
+        opp.add(S2);
+        Update opp1;
+        
+        i2.Invoice__c=S2.id;
+        i2.Name__c=S2.Name;
+        i2.Type__c=S2.Type__c;
+        i2.Amount__c=S1.Amount+S2.Amount+Serv2.Amount+Serv1.Amount;
+        i2.Opportunity_Name__c=S1.Name+','+S2.Name;
+        Update i2;
+        
+        
+        // In Invoice object type of the record is nt there and Insert the record with type of the opportunity Record
+        List<Opportunity> upOpp=new List<Opportunity>();
+        S2.Name='S2';
+        S2.Amount=500;
+        S2.Type__c='Sales';
+        upOpp.add(S2);
+        Update upOpp;
+        
+        Invoice__c ii=new Invoice__c();
+        ii.Invoice__c=S2.id;
+        ii.Name__c=S2.Name;
+        ii.Type__c=S2.Type__c;
+        ii.Amount__c=S2.Amount;
+        ii.Opportunity_Name__c=S2.Name;
+        Insert ii;
         
         // If Opportunity Record is Delete, In Invoice record page Delete the Same type of the Opportunity record
         // Opportunity Delete
@@ -277,6 +477,7 @@ public class OpportunityToInvoiceTestClass {
         S1.Name='S1';
         S1.CloseDate=System.Today();
         S1.StageName='Closed Won';
+        S1.Amount=500;
         S1.Type__c='Service';
         oppDelete.add(S1);
         Delete oppDelete;
@@ -284,6 +485,7 @@ public class OpportunityToInvoiceTestClass {
         i.Invoice__c=S2.id;
         i.Name__c=S2.Name;
         i.Type__c=S2.Type__c;
+        i.Amount__c=S2.Amount;
         i.Opportunity_Name__c=S2.Name;
         Update i;
         
@@ -295,5 +497,7 @@ public class OpportunityToInvoiceTestClass {
         oppDelete1.add(S2);
         Delete oppDelete1;
         
+                Test.StopTest();
+
     }
 }
