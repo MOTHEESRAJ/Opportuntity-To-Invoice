@@ -170,7 +170,7 @@ public class OpportunityToInvoicClass {
     
     // If Amount is updated this should be called
     public static void amountIsUpdated(Set<Id>  amountIds,Decimal newAmount,Decimal oldAmount,String oldType){
-        Opportunity oppList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Id IN :amountIds];
+        Opportunity oppList = [SELECT Id, Type__c, Name FROM Opportunity WHERE Id IN :amountIds Order By Name ASC];
         List<Opportunity> oldTypeOpportunity=[Select id,Type__c, Name FROM Opportunity WHERE Type__c=:oldType and Amount!=null
                                               Order By Name ASC];
         // All new opportunity type
@@ -183,13 +183,11 @@ public class OpportunityToInvoicClass {
         if((newAmount!=null && oldType!=null)||(newAmount==null && oldType!=null)){
             System.debug('Hi From newAmount');
             Decimal newTotalAmount;
-            for(Opportunity opp:newTypeOpportunity){
                 List<AggregateResult> aggResAmount=[Select id,Sum(Amount) totalAmount from Opportunity where Type__c=:oppList.Type__c and Amount!=null
                                                     Group By Id];
                 System.debug(aggResAmount);
                 newTotalAmount=calculateOppAmount(aggResAmount);
                 System.debug(newTotalAmount);
-            }
             for(Invoice__c inv:listType){
                 if(oppList.Type__c==inv.Type__c){
                     Invoice__c i=new Invoice__c(id=inv.Id,
@@ -209,7 +207,7 @@ public class OpportunityToInvoicClass {
     
     // If Type is updated this method should be called
     public static void typeIsUpdated(Set<Id> typeOfIds,String newType,String oldType,Decimal newAmount,Decimal oldAmount){
-        Opportunity oppList = [SELECT Id, Type__c, Name,Amount FROM Opportunity WHERE Id IN :typeOfIds];
+        Opportunity oppList = [SELECT Id, Type__c, Name,Amount FROM Opportunity WHERE Id IN :typeOfIds Order By Name ASC];
         // All Old opportunity type
         List<Opportunity> oldTypeOpportunity=[Select id,Type__c, Name FROM Opportunity WHERE Type__c=:oldType and Amount!=null Order By Name ASC];
         // All new opportunity type
@@ -224,13 +222,11 @@ public class OpportunityToInvoicClass {
         if(newType!=null){
             System.debug('Hi from newType');
             Decimal newTotalAmount;
-            for(Opportunity opp:newTypeOpportunity){
                 List<AggregateResult> aggResAmount=[Select id,Sum(Amount) totalAmount from Opportunity where Type__c=:oppList.Type__c and Amount!=null
                                                     Group By Id];
                 System.debug(aggResAmount);
                 newTotalAmount=calculateOppAmount(aggResAmount);
                 System.debug(newTotalAmount);
-            }
             for(Invoice__c inv:listType){
                 if(oppList.Type__c==inv.Type__c && !emptyInvoice.isEmpty()){
                     Invoice__c i=new Invoice__c(id=inv.Id,
@@ -262,14 +258,16 @@ public class OpportunityToInvoicClass {
         // If NewType is null and old type is not null  Remove the record in invoice
         if(oldType!=null){
             System.debug('Hi from OldType');
-            List<Invoice__c> listOfCurrentType=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c = :oldType ];
-            System.debug(listOfCurrentType[0].Opportunity_Name__c);
-            List<String> splitType=listOfCurrentType[0].Opportunity_Name__c.split(',');
+            Invoice__c listOfCurrentType=[SELECT Id, Type__c, Name__c, Opportunity_Name__c FROM Invoice__c where Type__c = :oldType ];
+            System.debug(listOfCurrentType.Opportunity_Name__c);
+            List<String> splitType=listOfCurrentType.Opportunity_Name__c.split(',');
             System.debug(splitType);
             List<String> nameOfTheOldTypeName = new List<String>();
+            String lastName;
             for (String s : splitType) {
                 if (oppList.Name != s) {
                     nameOfTheOldTypeName.add(s);
+                    lastName=s;
                     
                 }
             }
@@ -278,20 +276,19 @@ public class OpportunityToInvoicClass {
             String commaSeparatedNames;
             
             Decimal oldTotalAmount;
-            for(Opportunity opp:oldTypeOpportunity){
                 List<AggregateResult> aggResAmount=[Select id,Sum(Amount) totalAmount from Opportunity where Type__c=:oldType and Amount!=null
                                                     Group By Id];
                 System.debug(aggResAmount);
                 oldTotalAmount=calculateOppAmount(aggResAmount);
                 System.debug(oldTotalAmount);
-            }
             
             if(!nameOfTheOldTypeName.isEmpty()){
                 System.debug('Not Empty');
                 commaSeparatedNames= String.join(nameOfTheOldTypeName, ',');
                 
                 for(Opportunity opp:oppOldTypeList){
-                    Invoice__c i=new Invoice__c(id=listOfCurrentType[0].Id,
+                    if(lastName==opp.Name){
+                         Invoice__c i=new Invoice__c(id=listOfCurrentType.Id,
                                                 Invoice__c=opp.Id,
                                                 Name__c=opp.Name,
                                                 Amount__c=oldTotalAmount,
@@ -299,6 +296,7 @@ public class OpportunityToInvoicClass {
                                                );
                     System.debug(i.Opportunity_Name__c);
                     Update i;
+                    }
                 }
             }
             else{
@@ -308,7 +306,6 @@ public class OpportunityToInvoicClass {
         }
     }
 }
-
 
 Test Class
 
